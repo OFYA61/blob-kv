@@ -1,0 +1,6 @@
+[package]
+name = "blob-kv-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

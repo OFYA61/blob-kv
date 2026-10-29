@@ -1,0 +1,7 @@
+[package]
+name = "blob-kv-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+blob-kv-engine = { path = "../blob-kv-engine" }
