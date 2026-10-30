@@ -1,0 +1,30 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        BUILD_TARGET: [release]
+    steps:
+    - name: Cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - uses: actions/checkout@v4
+    - name: Build in ${{ matrix.BUILD_TARGET }} mode
+      run: cargo build --verbose --profile ${{ matrix.BUILD_TARGET }}
+    - name: Run tests in ${{ matrix.BUILD_TARGET }} mode
+      run: cargo test --verbose --profile ${{matrix.BUILD_TARGET }}
