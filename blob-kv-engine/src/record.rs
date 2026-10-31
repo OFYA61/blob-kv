@@ -111,7 +111,7 @@ impl Record {
             if key_len == 0 {
                 return Err(RecordDecodeError::InvalidKey);
             }
-            if key_len + value_len != length - RECORD_HEADER_LENGTH - 4 {
+            if key_len + value_len != length - RECORD_HEADER_LENGTH - RECORD_CHECKSUM_LENGTH {
                 return Err(RecordDecodeError::InvalidKeyValueLength);
             }
 
