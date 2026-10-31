@@ -14,25 +14,25 @@
 
 Maximum record model size is 1,049,618 bytes, around 1 MiB.
 
-| Field          | Purpose                                                                                                                              | Size                            |     |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- | --- |
-| Record length  | The size of the encoded record                                                                                                       | 4 bytes                         |     |
-| Format version | Identifies the format of the record                                                                                                  | 1 byte                          |     |
-| Operation type | `SET` or `DEL`                                                                                                                       | 1 byte                          |     |
-| Key length     | Number of key bytes                                                                                                                  | 4 bytes                         |     |
-| Value length   | Number of value bytes                                                                                                                | 4 bytes                         |     |
-| Key bytes      | Stores the key in UTF-8                                                                                                              | Variable (max. 1,024 bytes)     |     |
-| Value bytes    | Stores the value in UTF-8                                                                                                            | Variable (max. 1,048,576 bytes) |     |
-| Checksum       | Used to detect corruption (calculated using every field except the `Checksum` field itself). Use `CRC32C` as the checksum algorithm. | 4 bytes                         |     |
+| Field          | Purpose                                                                                                                              | Size                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| Record length  | The size of the encoded record                                                                                                       | 4 bytes                         |
+| Format version | Identifies the format of the record                                                                                                  | 1 byte                          |
+| Operation type | `SET` or `DEL`                                                                                                                       | 1 byte                          |
+| Key length     | Number of key bytes                                                                                                                  | 4 bytes                         |
+| Value length   | Number of value bytes                                                                                                                | 4 bytes                         |
+| Key bytes      | Stores the key in UTF-8                                                                                                              | Variable (max. 1,024 bytes)     |
+| Value bytes    | Stores the value in UTF-8                                                                                                            | Variable (max. 1,048,576 bytes) |
+| Checksum       | Used to detect corruption (calculated using every field except the `Checksum` field itself). Use `CRC32C` as the checksum algorithm. | 4 bytes                         |
 ### Implement
 
-- [ ] Encode a valid logical record into bytes
-- [ ] Decode bytes into a valid logic record
-- [ ] Reject records that violate the format
-- [ ] Calculate and verify the checksum
+- [x] Encode a valid logical record into bytes
+- [x] Decode bytes into a valid logic record
+- [x] Reject records that violate the format
+- [x] Calculate and verify the checksum
 
 ### Testing
 
-- [ ] A short key and short value
-- [ ] An empty value
-- [ ] A long value within the configured limit
+- [x] A short key and short value
+- [x] An empty value
+- [x] A long value within the configured limit
