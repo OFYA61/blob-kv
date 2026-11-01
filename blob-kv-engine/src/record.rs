@@ -22,9 +22,9 @@ const RECORD_MAX_LENGTH: u32 = u32::MAX;
 /// The numbers are stored in little-endian format
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    key: String,
-    value: String,
-    op: RecordOp,
+    pub key: String,
+    pub value: String,
+    pub op: RecordOp,
 }
 
 impl Record {
@@ -73,8 +73,16 @@ impl Record {
         encoding
     }
 
+    pub fn encode_size(&self) -> usize {
+        self.encode().len()
+    }
+
     pub fn decode(bytes: &[u8]) -> Result<Self, RecordDecodeError> {
         if (bytes.len() as u32) < RECORD_MIN_LENGTH {
+            return Err(RecordDecodeError::InvalidRecordSize);
+        }
+
+        if (bytes.len() as u32) >= RECORD_MAX_LENGTH {
             return Err(RecordDecodeError::InvalidRecordSize);
         }
 
