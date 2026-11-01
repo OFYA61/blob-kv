@@ -12,8 +12,7 @@ const MAGIC_BYTES: [u8; 8] = [0x52, 0x55, 0x53, 0x54, 0x4B, 0x56, 0x44, 0x42];
 const VERSION_BYTES_START: usize = MAGIC_BYTES.len();
 const VERSION_BYTES_LENGTH: usize = 2;
 const VERSION_EXPECTED: u16 = 1;
-
-const fn default_header() -> [u8; HEADER_LENGTH] {
+const DEFAULT_HEADER: [u8; HEADER_LENGTH] = {
     let mut header = [0u8; HEADER_LENGTH];
 
     let mut i = 0;
@@ -31,9 +30,7 @@ const fn default_header() -> [u8; HEADER_LENGTH] {
     }
 
     header
-}
-
-const DEFAULT_HEADER: [u8; HEADER_LENGTH] = default_header();
+};
 
 macro_rules! log_io {
     ($expr: expr) => {
