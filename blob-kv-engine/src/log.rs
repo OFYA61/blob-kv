@@ -91,7 +91,7 @@ impl Log {
         Ok(position)
     }
 
-    pub fn scan_full(&mut self) -> Result<Vec<RecordWrap>, RecordScanError> {
+    pub fn scan_full(&self) -> Result<Vec<RecordWrap>, RecordScanError> {
         let file_size = record_scan_io!(self.file.metadata())?.len();
         let mut offset = HEADER_LENGTH as u64;
         let mut records = Vec::new();
@@ -348,7 +348,7 @@ mod test {
             .expect("Faild to overrwite checksum for record1");
         drop(file);
 
-        let mut log = Log::new(&path).expect("Failed to reopne log");
+        let log = Log::new(&path).expect("Failed to reopne log");
 
         let scan = log.scan_full().expect("Failed to scan records");
         assert_eq!(scan.len(), 2);

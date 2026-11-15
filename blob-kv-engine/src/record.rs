@@ -144,7 +144,7 @@ impl Record {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordOp {
     Set = 0,
     Del = 1,

@@ -1,2 +1,5 @@
-pub mod log;
-pub mod record;
+mod engine;
+mod log;
+mod record;
+
+pub use engine::Engine;
