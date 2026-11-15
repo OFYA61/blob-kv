@@ -32,41 +32,27 @@ const DEFAULT_HEADER: [u8; HEADER_LENGTH] = {
     header
 };
 
-macro_rules! log_io {
-    ($expr: expr) => {
-        $expr.map_err(|e| LogCreateError::Io(e))
-    };
-}
-
-macro_rules! record_scan_io {
-    ($expr:expr) => {
-        $expr.map_err(|e| RecordScanError::Io(e))
-    };
-}
-
 #[derive(Debug)]
 pub struct Log {
     file: fs::File,
 }
 
 impl Log {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, LogCreateError> {
+    pub fn init(path: impl AsRef<Path>) -> Result<Self, LogInitError> {
         let exists = Path::new(path.as_ref()).exists();
-        let mut file = log_io!(
-            fs::OpenOptions::new()
-                .create(true)
-                .read(true)
-                .append(true)
-                .open(path)
-        )?;
-        file.try_lock().map_err(|e| LogCreateError::Lock(e))?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(path)?;
+        file.try_lock()?;
 
         if exists {
             let mut header_buf = [0u8; HEADER_LENGTH];
-            log_io!(file.read_exact_at(&mut header_buf, 0))?;
+            file.read_exact_at(&mut header_buf, 0)?;
 
             if !header_buf[0..8].eq(&MAGIC_BYTES) {
-                return Err(LogCreateError::InvalidMagic);
+                return Err(LogInitError::InvalidMagic);
             }
 
             let version = u16::from_le_bytes(
@@ -75,10 +61,10 @@ impl Log {
                     .unwrap(),
             );
             if version != VERSION_EXPECTED {
-                return Err(LogCreateError::InvalidVersion);
+                return Err(LogInitError::InvalidVersion(version));
             }
         } else {
-            log_io!(file.write_all(&DEFAULT_HEADER))?;
+            file.write_all(&DEFAULT_HEADER)?;
         }
 
         Ok(Self { file })
@@ -92,7 +78,7 @@ impl Log {
     }
 
     pub fn scan_full(&self) -> Result<Vec<RecordWrap>, RecordScanError> {
-        let file_size = record_scan_io!(self.file.metadata())?.len();
+        let file_size = self.file.metadata()?.len();
         let mut offset = HEADER_LENGTH as u64;
         let mut records = Vec::new();
 
@@ -121,35 +107,40 @@ impl Log {
     }
 
     pub fn scan_record(&self, position: u64) -> Result<Record, RecordScanError> {
-        let record = Record::decode(&self.scan_record_bytes(position)?)
-            .map_err(|e| RecordScanError::Decoding(e))?;
+        let record = Record::decode(&self.scan_record_bytes(position)?)?;
         Ok(record)
     }
 
     fn scan_record_bytes(&self, position: u64) -> Result<Vec<u8>, RecordScanError> {
         let mut len_buf = [0u8; 4];
-        record_scan_io!(self.file.read_exact_at(&mut len_buf, position))?;
+        self.file.read_exact_at(&mut len_buf, position)?;
 
         let len = u32::from_le_bytes(len_buf);
         let mut buffer = vec![0u8; len as usize];
-        record_scan_io!(self.file.read_exact_at(&mut buffer, position))?;
+        self.file.read_exact_at(&mut buffer, position)?;
 
         Ok(buffer)
     }
 }
 
-#[derive(Debug)]
-pub enum LogCreateError {
-    Io(io::Error),
-    Lock(fs::TryLockError),
+#[derive(thiserror::Error, Debug)]
+pub enum LogInitError {
+    #[error("io error: {0:?}")]
+    Io(#[from] io::Error),
+    #[error("lock error: {0:?}")]
+    Lock(#[from] fs::TryLockError),
+    #[error("invalid magic")]
     InvalidMagic,
-    InvalidVersion,
+    #[error("invalid version '{0}'")]
+    InvalidVersion(u16),
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum RecordScanError {
-    Io(io::Error),
-    Decoding(RecordDecodeError),
+    #[error("io error: {0:?}")]
+    Io(#[from] io::Error),
+    #[error("decode error: {0:?}")]
+    Decoding(#[from] RecordDecodeError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,22 +180,22 @@ mod test {
     fn it_creates_new_log_when_initializing() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
-        let log = Log::new(&path).expect("Failed to create log");
+        let log = Log::init(&path).expect("Failed to create log");
         assert!(path.exists());
 
         drop(log);
-        let _ = Log::new(&path).expect("Failed to reopen log");
+        let _ = Log::init(&path).expect("Failed to reopen log");
     }
 
     #[test]
     fn it_fails_to_initialize_when_log_file_is_locked() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
-        let log = Log::new(&path).expect("Failed to create log");
+        let log = Log::init(&path).expect("Failed to create log");
         assert!(path.exists());
 
-        let result = Log::new(&path);
-        assert_matches!(result, Err(LogCreateError::Lock(_)));
+        let result = Log::init(&path);
+        assert_matches!(result, Err(LogInitError::Lock(_)));
 
         drop(log);
     }
@@ -213,7 +204,7 @@ mod test {
     fn it_opens_existing_log_when_initializing() {
         let dir = get_dir();
         let log_path = create_empty_log(&dir);
-        let _ = Log::new(&log_path).expect("Failed to open existing log");
+        let _ = Log::init(&log_path).expect("Failed to open existing log");
     }
 
     #[test]
@@ -226,8 +217,8 @@ mod test {
         file.write_all(&header)
             .expect("Failed to write header to log");
 
-        let result = Log::new(&path);
-        assert_matches!(result, Err(LogCreateError::InvalidMagic));
+        let result = Log::init(&path);
+        assert_matches!(result, Err(LogInitError::InvalidMagic));
     }
 
     #[test]
@@ -240,15 +231,15 @@ mod test {
         file.write_all(&header)
             .expect("Failed to write header to log");
 
-        let result = Log::new(&path);
-        assert_matches!(result, Err(LogCreateError::InvalidVersion));
+        let result = Log::init(&path);
+        assert_matches!(result, Err(LogInitError::InvalidVersion(255)));
     }
 
     #[test]
     fn it_appends() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
-        let mut log = Log::new(&path).expect("Failed to create log");
+        let mut log = Log::init(&path).expect("Failed to create log");
 
         let record = Record::new("hello", "world", RecordOp::Set).unwrap();
 
@@ -262,7 +253,7 @@ mod test {
     fn it_appends_and_retrieves_multiple_records() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
-        let mut log = Log::new(&path).expect("Failed to create log");
+        let mut log = Log::init(&path).expect("Failed to create log");
 
         let record1 = Record::new("hello", "world", RecordOp::Set).unwrap();
         let record2 = Record::new("hello2", "world2", RecordOp::Set).unwrap();
@@ -273,10 +264,10 @@ mod test {
         let pos3 = log.append(&record3).expect("Failed to append record3");
 
         assert_eq!(pos1, HEADER_LENGTH as u64);
-        assert_eq!(pos2, (HEADER_LENGTH + record1.encode_size()) as u64);
+        assert_eq!(pos2, (HEADER_LENGTH + record1.encode().len()) as u64);
         assert_eq!(
             pos3,
-            (HEADER_LENGTH + record1.encode_size() + record2.encode_size()) as u64
+            (HEADER_LENGTH + record1.encode().len() + record2.encode().len()) as u64
         );
 
         let record1_scan = log.scan_record(pos1).expect("Failed to scan record1");
@@ -291,7 +282,7 @@ mod test {
     fn it_scans_multiple_records() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
-        let mut log = Log::new(&path).expect("Failed to create log");
+        let mut log = Log::init(&path).expect("Failed to create log");
 
         let record1 = Record::new("hello", "world", RecordOp::Set).unwrap();
         let record2 = Record::new("hello2", "", RecordOp::Set).unwrap();
@@ -315,7 +306,7 @@ mod test {
     fn it_rejects_invalid_record_positions() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
-        let mut log = Log::new(&path).expect("Failed to create log");
+        let mut log = Log::init(&path).expect("Failed to create log");
 
         let record = Record::new("hello", "world", RecordOp::Set).unwrap();
         let pos = log.append(&record).expect("Failed to append record");
@@ -328,7 +319,7 @@ mod test {
     fn it_ignores_invalid_logs_on_scan() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
-        let mut log = Log::new(&path).expect("Failed to create log");
+        let mut log = Log::init(&path).expect("Failed to create log");
 
         let record1 = Record::new("hello", "world", RecordOp::Set).unwrap();
         let record2 = Record::new("hello2", "", RecordOp::Set).unwrap();
@@ -348,7 +339,7 @@ mod test {
             .expect("Faild to overrwite checksum for record1");
         drop(file);
 
-        let log = Log::new(&path).expect("Failed to reopne log");
+        let log = Log::init(&path).expect("Failed to reopne log");
 
         let scan = log.scan_full().expect("Failed to scan records");
         assert_eq!(scan.len(), 2);
