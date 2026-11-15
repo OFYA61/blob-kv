@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io, path::Path};
 
 use crate::{
-    log::{Log, LogCreateError, RecordScanError},
+    log::{Log, LogInitError, RecordScanError},
     record::{Record, RecordCreateError, RecordOp},
 };
 
@@ -11,10 +11,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(log_path: impl AsRef<Path>) -> Result<Self, EngineCreateError> {
-        let log = Log::new(log_path).map_err(|e| EngineCreateError::LogCreate(e))?;
+    pub fn init(log_path: impl AsRef<Path>) -> Result<Self, EngineInitError> {
+        let log = Log::init(log_path)?;
         let mut index = HashMap::new();
-        let records = log.scan_full().map_err(|e| EngineCreateError::LogScan(e))?;
+        let records = log.scan_full()?;
 
         for record_wrap in records {
             let key = record_wrap.record.key;
@@ -32,22 +32,15 @@ impl Engine {
         match self.index.get(key) {
             None => Ok(None),
             Some(pos) => {
-                let record = self
-                    .log
-                    .scan_record(*pos)
-                    .map_err(|e| EngineGetError::LogScan(e))?;
+                let record = self.log.scan_record(*pos)?;
                 Ok(Some(record.value.clone()))
             }
         }
     }
 
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), EngineSetError> {
-        let record =
-            Record::new(key, value, RecordOp::Set).map_err(|e| EngineSetError::RecordCreate(e))?;
-        let new_pos = self
-            .log
-            .append(&record)
-            .map_err(|e| EngineSetError::LogAppend(e))?;
+        let record = Record::new(key, value, RecordOp::Set)?;
+        let new_pos = self.log.append(&record)?;
         self.index.insert(key.to_string(), new_pos);
         Ok(())
     }
@@ -57,38 +50,42 @@ impl Engine {
             return Ok(false);
         }
 
-        let del_record =
-            Record::new(key, "", RecordOp::Del).map_err(|e| EngineDelError::RecordCreate(e))?;
-        self.log
-            .append(&del_record)
-            .map_err(|e| EngineDelError::LogAppend(e))?;
+        let del_record = Record::new(key, "", RecordOp::Del)?;
+        self.log.append(&del_record)?;
         self.index.remove(key);
 
         Ok(true)
     }
 }
 
-#[derive(Debug)]
-pub enum EngineCreateError {
-    LogCreate(LogCreateError),
-    LogScan(RecordScanError),
+#[derive(thiserror::Error, Debug)]
+pub enum EngineInitError {
+    #[error("failed to initialize log: {0:?}")]
+    LogInit(#[from] LogInitError),
+    #[error("failed to scan log: {0:?}")]
+    LogScan(#[from] RecordScanError),
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum EngineGetError {
-    LogScan(RecordScanError),
+    #[error("failed to scan log: {0:?}")]
+    LogScan(#[from] RecordScanError),
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum EngineSetError {
-    RecordCreate(RecordCreateError),
-    LogAppend(io::Error),
+    #[error("failed to append record to log: {0:?}")]
+    LogAppend(#[from] io::Error),
+    #[error("failed to create record: {0:?}")]
+    RecordCreate(#[from] RecordCreateError),
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum EngineDelError {
-    LogAppend(io::Error),
-    RecordCreate(RecordCreateError),
+    #[error("failed to append record to log: {0:?}")]
+    LogAppend(#[from] io::Error),
+    #[error("failed to create record: {0:?}")]
+    RecordCreate(#[from] RecordCreateError),
 }
 
 #[cfg(test)]
@@ -116,7 +113,7 @@ mod test {
     }
 
     fn create_engine(dir: &TempDir) -> Engine {
-        Engine::new(get_log_path(dir)).expect("Failed to create engine")
+        Engine::init(get_log_path(dir)).expect("Failed to create engine")
     }
 
     fn flip_byte(path: &Path, position: u64) {
@@ -216,7 +213,8 @@ mod test {
         let pos = *engine.index.get("hello").expect("Failed to find key");
         let record_len = Record::new("hello", "world", RecordOp::Set)
             .expect("Failed to create record")
-            .encode_size() as u64;
+            .encode()
+            .len() as u64;
 
         flip_byte(&path, pos + record_len - 1);
 
@@ -284,7 +282,7 @@ mod test {
         engine.set("goodbye", "moon").expect("Failed to set key");
         drop(engine);
 
-        let engine = Engine::new(&path).expect("Failed to reopen engine");
+        let engine = Engine::init(&path).expect("Failed to reopen engine");
         let hello = engine.get("hello").expect("Failed to get key");
         let goodbye = engine.get("goodbye").expect("Failed to get key");
         assert_eq!(hello, Some("world".to_string()));
@@ -303,7 +301,7 @@ mod test {
             .expect("Failed to overwrite key");
         drop(engine);
 
-        let engine = Engine::new(&path).expect("Failed to reopen engine");
+        let engine = Engine::init(&path).expect("Failed to reopen engine");
         let value = engine.get("hello").expect("Failed to get key");
         assert_eq!(value, Some("mars".to_string()));
     }
@@ -319,7 +317,7 @@ mod test {
         assert!(deleted);
         drop(engine);
 
-        let engine = Engine::new(&path).expect("Failed to reopen engine");
+        let engine = Engine::init(&path).expect("Failed to reopen engine");
         let value = engine.get("hello").expect("Failed to get key");
         assert_eq!(value, None);
     }
@@ -350,12 +348,13 @@ mod test {
         let first_pos = *engine.index.get("first").expect("Failed to find key");
         let first_len = Record::new("first", "one", RecordOp::Set)
             .expect("Failed to create record")
-            .encode_size() as u64;
+            .encode()
+            .len() as u64;
         drop(engine);
 
         flip_byte(&path, first_pos + first_len - 1);
 
-        let engine = Engine::new(&path).expect("Failed to reopen engine");
+        let engine = Engine::init(&path).expect("Failed to reopen engine");
         let first = engine.get("first").expect("Failed to get key");
         let second = engine.get("second").expect("Failed to get key");
         assert_eq!(first, None);
@@ -370,7 +369,9 @@ mod test {
         let result = engine.set("", "world");
         assert_matches!(
             result,
-            Err(EngineSetError::RecordCreate(RecordCreateError::InvalidKey))
+            Err(EngineSetError::RecordCreate(RecordCreateError::InvalidKey(
+                _
+            )))
         );
 
         let value = engine.get("").expect("Failed to get key");
@@ -381,12 +382,12 @@ mod test {
     fn it_fails_to_create_engine_when_log_is_locked() {
         let dir = get_dir();
         let path = get_log_path(&dir);
-        let engine = Engine::new(&path).expect("Failed to create engine");
+        let engine = Engine::init(&path).expect("Failed to create engine");
 
-        let result = Engine::new(&path);
+        let result = Engine::init(&path);
         assert!(matches!(
             result,
-            Err(EngineCreateError::LogCreate(LogCreateError::Lock(_)))
+            Err(EngineInitError::LogInit(LogInitError::Lock(_)))
         ));
 
         drop(engine);

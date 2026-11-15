@@ -1,3 +1,5 @@
+use std::string::FromUtf8Error;
+
 use crc::CRC_32_ISO_HDLC;
 use crc::Crc;
 
@@ -30,16 +32,19 @@ pub struct Record {
 impl Record {
     pub fn new(key: &str, value: &str, op: RecordOp) -> Result<Self, RecordCreateError> {
         if key.len() == 0 {
-            return Err(RecordCreateError::InvalidKey);
+            return Err(RecordCreateError::InvalidKey(key.to_string()));
         }
 
-        if RECORD_HEADER_LENGTH
+        let len = RECORD_HEADER_LENGTH
             + key.bytes().len() as u32
             + value.bytes().len() as u32
-            + RECORD_CHECKSUM_LENGTH
-            >= RECORD_MAX_LENGTH
-        {
-            return Err(RecordCreateError::SizeLimitExceeded);
+            + RECORD_CHECKSUM_LENGTH;
+
+        if len >= RECORD_MAX_LENGTH {
+            return Err(RecordCreateError::SizeLimitExceeded {
+                len,
+                max_len: RECORD_MAX_LENGTH,
+            });
         }
 
         Ok(Self {
@@ -73,41 +78,41 @@ impl Record {
         encoding
     }
 
-    pub fn encode_size(&self) -> usize {
-        self.encode().len()
-    }
-
     pub fn decode(bytes: &[u8]) -> Result<Self, RecordDecodeError> {
-        if (bytes.len() as u32) < RECORD_MIN_LENGTH {
-            return Err(RecordDecodeError::InvalidRecordSize);
+        let record_len = bytes.len() as u32;
+        if record_len < RECORD_MIN_LENGTH {
+            return Err(RecordDecodeError::RecordSizeTooLow(record_len));
         }
 
-        if (bytes.len() as u32) >= RECORD_MAX_LENGTH {
-            return Err(RecordDecodeError::InvalidRecordSize);
+        if record_len >= RECORD_MAX_LENGTH {
+            return Err(RecordDecodeError::RecordSizeTooHigh(record_len));
         }
 
         unsafe {
             let mut offset = 0;
 
             // Read the header
-            let length =
-                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap_unchecked());
+            let len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap_unchecked());
             offset += 4;
-            if bytes.len() as u32 != length {
-                return Err(RecordDecodeError::LengthMismatch);
+            let actual_len = bytes.len() as u32;
+            if actual_len != len {
+                return Err(RecordDecodeError::LengthMismatch {
+                    len,
+                    expected: actual_len,
+                });
             }
 
             let version =
                 u8::from_le_bytes(bytes[offset..offset + 1].try_into().unwrap_unchecked());
             offset += 1;
             if version != RECORD_ENCODING_VERSION {
-                return Err(RecordDecodeError::InvalidVersion);
+                return Err(RecordDecodeError::InvalidVersion(version));
             }
 
             let op_byte =
                 u8::from_le_bytes(bytes[offset..offset + 1].try_into().unwrap_unchecked());
             offset += 1;
-            let op = RecordOp::from(op_byte).map_err(|_| RecordDecodeError::InvalidOp)?;
+            let op = RecordOp::from(op_byte).map_err(|_| RecordDecodeError::InvalidOp(op_byte))?;
 
             let key_len =
                 u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap_unchecked());
@@ -119,16 +124,22 @@ impl Record {
             if key_len == 0 {
                 return Err(RecordDecodeError::InvalidKey);
             }
-            if key_len + value_len != length - RECORD_HEADER_LENGTH - RECORD_CHECKSUM_LENGTH {
-                return Err(RecordDecodeError::InvalidKeyValueLength);
+
+            let expected_key_value_len = len - RECORD_HEADER_LENGTH - RECORD_CHECKSUM_LENGTH;
+            if key_len + value_len != expected_key_value_len {
+                return Err(RecordDecodeError::InvalidKeyValueLength {
+                    key_len,
+                    value_len,
+                    expected: expected_key_value_len,
+                });
             }
 
             // Read the key and value
             let key = String::from_utf8(bytes[offset..offset + key_len as usize].to_vec())
-                .map_err(|_| RecordDecodeError::InvalidKeyBytes)?;
+                .map_err(RecordDecodeError::InvalidKeyBytes)?;
             offset += key_len as usize;
             let value = String::from_utf8(bytes[offset..offset + value_len as usize].to_vec())
-                .map_err(|_| RecordDecodeError::InvalidValueBytes)?;
+                .map_err(RecordDecodeError::InvalidValueBytes)?;
             offset += value_len as usize;
 
             let checksum =
@@ -160,27 +171,48 @@ impl RecordOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum RecordCreateError {
-    InvalidKey,
-    SizeLimitExceeded,
+    #[error("invalid key '{0}'")]
+    InvalidKey(String),
+    #[error("size limit exceeded, got '{len:?}' bytes, max allowed bytes '{max_len:?}'")]
+    SizeLimitExceeded { len: u32, max_len: u32 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum RecordDecodeError {
+    #[error("checksum mismatch")]
     ChecksumMismatch,
-    LengthMismatch,
+    #[error("length mismatch. Got '{len:?}', expected '{expected:?}' ")]
+    LengthMismatch { len: u32, expected: u32 },
+    #[error("")]
     InvalidKey,
-    InvalidKeyValueLength,
-    InvalidRecordSize,
-    InvalidOp,
-    InvalidVersion,
-    InvalidKeyBytes,
-    InvalidValueBytes,
+    #[error(
+        "invalid key value length, got key len '{key_len:?}' value len '{value_len:?}', expected total '{expected:?}'"
+    )]
+    InvalidKeyValueLength {
+        key_len: u32,
+        value_len: u32,
+        expected: u32,
+    },
+    #[error("record size below require minium of {RECORD_MIN_LENGTH}, got '{0}'")]
+    RecordSizeTooLow(u32),
+    #[error("record size above allowed maximum of {RECORD_MAX_LENGTH}, got '{0}'")]
+    RecordSizeTooHigh(u32),
+    #[error("got invlaid op '{0}'")]
+    InvalidOp(u8),
+    #[error("got invalid version '{0}'")]
+    InvalidVersion(u8),
+    #[error("invalid key bytes: '{0}'")]
+    InvalidKeyBytes(FromUtf8Error),
+    #[error("invalid value bytes: '{0}'")]
+    InvalidValueBytes(FromUtf8Error),
 }
 
 #[cfg(test)]
 mod test {
+    use std::assert_matches;
+
     use super::*;
 
     /// Encoding for
@@ -197,7 +229,7 @@ mod test {
     fn it_does_not_create_record_with_empty_key() {
         assert_eq!(
             Record::new("", "World", RecordOp::Set),
-            Err(RecordCreateError::InvalidKey)
+            Err(RecordCreateError::InvalidKey("".to_string()))
         );
     }
 
@@ -233,11 +265,11 @@ mod test {
     fn it_does_not_decode_when_length_is_less_then_min() {
         assert_eq!(
             Record::decode(&[1, 2, 3, 4, 5]),
-            Err(RecordDecodeError::InvalidRecordSize)
+            Err(RecordDecodeError::RecordSizeTooLow(5))
         );
         assert_eq!(
             Record::decode(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]),
-            Err(RecordDecodeError::InvalidRecordSize)
+            Err(RecordDecodeError::RecordSizeTooLow(17))
         );
     }
 
@@ -247,7 +279,10 @@ mod test {
         encoding[0] = 32; // Modify length to something else
         assert_eq!(
             Record::decode(&encoding),
-            Err(RecordDecodeError::LengthMismatch)
+            Err(RecordDecodeError::LengthMismatch {
+                len: 32,
+                expected: ENCODING.len() as u32
+            })
         );
     }
 
@@ -257,7 +292,7 @@ mod test {
         encoding[4] = 99; // Set invalid version
         assert_eq!(
             Record::decode(&encoding),
-            Err(RecordDecodeError::InvalidVersion)
+            Err(RecordDecodeError::InvalidVersion(99))
         );
     }
 
@@ -265,7 +300,10 @@ mod test {
     fn it_does_not_decode_when_op_is_invalid() {
         let mut encoding = ENCODING;
         encoding[5] = 99; // Set invalid op
-        assert_eq!(Record::decode(&encoding), Err(RecordDecodeError::InvalidOp));
+        assert_eq!(
+            Record::decode(&encoding),
+            Err(RecordDecodeError::InvalidOp(99))
+        );
     }
 
     #[test]
@@ -289,7 +327,11 @@ mod test {
         encoding[10] -= 1;
         assert_eq!(
             Record::decode(&encoding),
-            Err(RecordDecodeError::InvalidKeyValueLength)
+            Err(RecordDecodeError::InvalidKeyValueLength {
+                key_len: 4,
+                value_len: 4,
+                expected: 10
+            })
         );
     }
 
@@ -301,7 +343,11 @@ mod test {
         encoding[10] += 1;
         assert_eq!(
             Record::decode(&encoding),
-            Err(RecordDecodeError::InvalidKeyValueLength)
+            Err(RecordDecodeError::InvalidKeyValueLength {
+                key_len: 6,
+                value_len: 6,
+                expected: 10
+            })
         );
     }
 
@@ -311,9 +357,9 @@ mod test {
         // Make first 2 bytes of the key invalid UTF8
         encoding[14] = INVALID_UTF8[0];
         encoding[15] = INVALID_UTF8[1];
-        assert_eq!(
+        assert_matches!(
             Record::decode(&encoding),
-            Err(RecordDecodeError::InvalidKeyBytes)
+            Err(RecordDecodeError::InvalidKeyBytes(_))
         );
     }
 
@@ -323,9 +369,9 @@ mod test {
         // Make first 2 bytes of the value invalid UTF8
         encoding[19] = INVALID_UTF8[0];
         encoding[20] = INVALID_UTF8[1];
-        assert_eq!(
+        assert_matches!(
             Record::decode(&encoding),
-            Err(RecordDecodeError::InvalidValueBytes)
+            Err(RecordDecodeError::InvalidValueBytes(_))
         );
     }
 
