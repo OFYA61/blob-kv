@@ -1,0 +1,8 @@
+[package]
+name = "blob-kv-protocol"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror = "2.0.21"
+tracing = "0.1.44"
