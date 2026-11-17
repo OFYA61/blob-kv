@@ -31,7 +31,9 @@ pub struct Record {
 
 impl Record {
     pub fn new(key: &str, value: &str, op: RecordOp) -> Result<Self, RecordCreateError> {
-        if key.len() == 0 {
+        tracing::debug!(operation=?op, key, "Record create initaited");
+
+        if key.is_empty() {
             return Err(RecordCreateError::InvalidKey(key.to_string()));
         }
 
@@ -47,6 +49,7 @@ impl Record {
             });
         }
 
+        tracing::debug!(operation=?op, key, "Record create finished");
         Ok(Self {
             key: key.to_owned(),
             value: value.to_owned(),
@@ -148,6 +151,8 @@ impl Record {
             if checksum != checksum_expected {
                 return Err(RecordDecodeError::ChecksumMismatch);
             }
+
+            tracing::debug!(operation=?op, key, "Record decode finished");
 
             Ok(Record::new(&key, &value, op).unwrap_unchecked())
         }
