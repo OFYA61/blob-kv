@@ -208,6 +208,20 @@ mod test {
     }
 
     #[test]
+    fn it_encodes_and_decodes_stored_status() {
+        let response = Response::new(Status::Stored, "").unwrap();
+        let decoded_response = Response::decode(&response.encode()).unwrap();
+        assert_eq!(decoded_response, response);
+    }
+
+    #[test]
+    fn it_encodes_and_decodes_deleted_status() {
+        let response = Response::new(Status::Deleted, "").unwrap();
+        let decoded_response = Response::decode(&response.encode()).unwrap();
+        assert_eq!(decoded_response, response);
+    }
+
+    #[test]
     fn it_does_not_decode_when_length_is_less_than_min() {
         assert_eq!(
             Response::decode(&[1, 2, 3, 4, 5]),

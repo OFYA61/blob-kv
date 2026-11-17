@@ -30,15 +30,18 @@ Simple thread-per-connection design to keep the scope small. No async runtime or
 
 ##### Request format
 
-| Field          | Purpose                                   | Size     | Notes                  |
-| -------------- | ----------------------------------------- | -------- | ---------------------- |
-| Version        | Version of the request format             | 1 byte   |                        |
-| Payload length | The size of the remaining fields in bytes | 4 bytes  |                        |
-| OpCode         | The operation that is being done          | 1 byte   |                        |
-| Key length     | The length of the key                     | 4 bytes  |                        |
-| Key            | The contents of the key                   | Variable |                        |
-| Value length   | The length of the value                   | 4 bytes  | Only present for `SET` |
-| Value          | The contents of the value                 | Variable | Only present for `SET` |
+The request header is always **16 bytes**.
+
+| Field          | Purpose                                              | Size     | Notes                  |
+| -------------- | ---------------------------------------------------- | -------- | ---------------------- |
+| Version        | Version of the request format                        | 1 byte   |                        |
+| Payload length | The size of the fields following the 16-byte header  | 4 bytes  |                        |
+| Reserved       | Reserved for future use                              | 11 bytes | Encoded as zeroes      |
+| OpCode         | The operation that is being done                     | 1 byte   |                        |
+| Key length     | The length of the key                                | 4 bytes  |                        |
+| Key            | The contents of the key                              | Variable |                        |
+| Value length   | The length of the value                              | 4 bytes  | Only present for `SET` |
+| Value          | The contents of the value                            | Variable | Only present for `SET` |
 ##### OpCode
 
 | Code | Value  |
@@ -49,24 +52,29 @@ Simple thread-per-connection design to keep the scope small. No async runtime or
 
 ##### Response format
 
-| Field          | Purpose                              | Size     |
-| -------------- | ------------------------------------ | -------- |
-| Version        | Version of the response format       | 1 byte   |
-| Status         | Indicates success or failure         | 1 byte   |
-| Payload length | Number of bytes following the header | 4 bytes  |
-| Payload        | The contents of the payload          | Variable |
+The response header is always **16 bytes**.
+
+| Field          | Purpose                                             | Size     | Notes             |
+| -------------- | --------------------------------------------------- | -------- | ----------------- |
+| Version        | Version of the response format                      | 1 byte   |                   |
+| Status         | Indicates success or failure                        | 1 byte   |                   |
+| Payload length | Number of bytes following the 16-byte header        | 4 bytes  |                   |
+| Reserved       | Reserved for future use                             | 10 bytes | Encoded as zeroes |
+| Payload        | The contents of the payload                         | Variable |                   |
 
 ##### Status codes
 
 | Code | Meaning                  |
 | ---- | ------------------------ |
-| 0x00 | OK                       |
-| 0x01 | Key not found            |
-| 0x02 | Invalid request          |
-| 0x03 | Unsupported operation    |
-| 0x04 | Internal server error    |
-| 0x05 | Value too large          |
-| 0x06 | Invalid protocol version |
+| 0x00 | OK (read operations)     |
+| 0x01 | Stored (SET succeeded)   |
+| 0x02 | Deleted (DELETE succeeded) |
+| 0x03 | Key not found            |
+| 0x04 | Invalid request          |
+| 0x05 | Unsupported operation    |
+| 0x06 | Internal server error    |
+| 0x07 | Value too large          |
+| 0x08 | Invalid protocol version |
 
 ### Implement: CLI Client
 
