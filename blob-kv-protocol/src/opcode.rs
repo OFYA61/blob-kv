@@ -1,9 +1,4 @@
 /// The operation that a request is performing.
-///
-/// Byte encoding:
-/// * `1` → [`OpCode::Set`]
-/// * `2` → [`OpCode::Get`]
-/// * `3` → [`OpCode::Delete`]
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpCode {
@@ -35,7 +30,6 @@ impl OpCode {
         Self::new(byte)
     }
 
-    /// Whether the operation carries a value on the wire.
     pub fn takes_value(&self) -> bool {
         matches!(self, Self::Set)
     }

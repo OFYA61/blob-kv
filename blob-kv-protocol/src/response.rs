@@ -2,7 +2,12 @@ use std::string::FromUtf8Error;
 
 use crate::status::{Status, StatusError};
 
-const RESPONSE_HEADER_LENGTH: u32 = 6; // version (1 byte) + status (1 byte) + payload length (4 bytes)
+/// Total size of a response header in bytes: version (1 byte), status
+/// (1 byte), payload length (4 bytes), and reserved header bytes (10 bytes).
+pub const RESPONSE_HEADER_LENGTH: u32 = 16;
+/// Number of reserved header bytes in a response. They are encoded as zeroes
+/// and ignored when decoding.
+pub const RESPONSE_RESERVED_HEADER_LENGTH: u32 = 10;
 const RESPONSE_ENCODING_VERSION: u8 = 1;
 const RESPONSE_MAX_LENGTH: u32 = u32::MAX;
 
@@ -10,10 +15,12 @@ const RESPONSE_MAX_LENGTH: u32 = u32::MAX;
 /// * format version (1 byte)
 /// * status (1 byte)
 /// * payload length (4 bytes)
+/// * reserved header bytes (10 bytes)
 /// * payload bytes (variable)
 ///
-/// The numbers are stored in big-endian format. The payload length covers
-/// the bytes that follow the header.
+/// The numbers are stored in big-endian format. The header is always 16 bytes,
+/// and the payload length covers the bytes that follow the header. The reserved
+/// header bytes are encoded as zeroes and ignored when decoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
     pub status: Status,
@@ -48,6 +55,7 @@ impl Response {
         encoding.push(RESPONSE_ENCODING_VERSION);
         encoding.push(self.status.encode());
         encoding.extend_from_slice(&payload_len.to_be_bytes());
+        encoding.extend_from_slice(&[0u8; RESPONSE_RESERVED_HEADER_LENGTH as usize]);
         encoding.extend_from_slice(payload_bytes);
 
         encoding
@@ -83,6 +91,9 @@ impl Response {
             let payload_len =
                 u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap_unchecked());
             offset += 4;
+
+            // Skip the reserved header bytes
+            offset += RESPONSE_RESERVED_HEADER_LENGTH as usize;
 
             // Read the payload
             let payload_end = offset + payload_len as usize;
@@ -142,10 +153,11 @@ mod test {
     /// ```
     /// Response::new(Status::Ok, "World");
     /// ```
-    const ENCODING: [u8; 11] = [
+    const ENCODING: [u8; 21] = [
         1, // version
         0, // status OK
         0, 0, 0, 5, // payload length
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // reserved header bytes
         87, 111, 114, 108, 100, // "World"
     ];
 
@@ -172,10 +184,19 @@ mod test {
     }
 
     #[test]
+    fn it_decodes_with_non_zero_reserved_header_bytes() {
+        let mut encoding = ENCODING;
+        encoding[6..16].fill(0xFF);
+        let decoded_response = Response::decode(&encoding).unwrap();
+        let expected_response = Response::new(Status::Ok, "World").unwrap();
+        assert_eq!(decoded_response, expected_response);
+    }
+
+    #[test]
     fn it_encodes_and_decodes_empty_payload() {
         let response = Response::new(Status::Ok, "").unwrap();
         let encoding = response.encode();
-        assert_eq!(encoding, [1, 0, 0, 0, 0, 0]);
+        assert_eq!(encoding, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(Response::decode(&encoding), Ok(response));
     }
 
@@ -192,6 +213,10 @@ mod test {
             Response::decode(&[1, 2, 3, 4, 5]),
             Err(ResponseDecodeError::ResponseSizeTooLow(5))
         );
+        assert_eq!(
+            Response::decode(&[0; 15]),
+            Err(ResponseDecodeError::ResponseSizeTooLow(15))
+        );
     }
 
     #[test]
@@ -201,7 +226,7 @@ mod test {
         assert_eq!(
             Response::decode(&encoding),
             Err(ResponseDecodeError::UnexpectedEnd {
-                needed: 12,
+                needed: 22,
                 available: ENCODING.len(),
             })
         );
@@ -242,8 +267,8 @@ mod test {
     #[test]
     fn it_does_not_decode_when_payload_is_invalid_utf8_bytes() {
         let mut encoding = ENCODING;
-        encoding[6] = INVALID_UTF8[0];
-        encoding[7] = INVALID_UTF8[1];
+        encoding[16] = INVALID_UTF8[0];
+        encoding[17] = INVALID_UTF8[1];
         assert_matches!(
             Response::decode(&encoding),
             Err(ResponseDecodeError::InvalidPayloadBytes(_))

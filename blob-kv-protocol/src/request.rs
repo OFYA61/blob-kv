@@ -2,7 +2,12 @@ use std::string::FromUtf8Error;
 
 use crate::opcode::{OpCode, OpCodeError};
 
-const REQUEST_HEADER_LENGTH: u32 = 5; // version (1 byte) + payload length (4 bytes)
+/// Total size of a request header in bytes: version (1 byte), payload length
+/// (4 bytes), and reserved header bytes (11 bytes).
+pub const REQUEST_HEADER_LENGTH: u32 = 16;
+/// Number of reserved header bytes in a request. They are encoded as zeroes
+/// and ignored when decoding.
+pub const REQUEST_RESERVED_HEADER_LENGTH: u32 = 11;
 const REQUEST_OPCODE_LENGTH: u32 = 1;
 const REQUEST_KEY_LENGTH_LENGTH: u32 = 4;
 const REQUEST_VALUE_LENGTH_LENGTH: u32 = 4;
@@ -15,14 +20,17 @@ const REQUEST_MAX_LENGTH: u32 = u32::MAX;
 /// Byte encode format:
 /// * format version (1 byte)
 /// * payload length (4 bytes)
+/// * reserved header bytes (11 bytes)
 /// * opcode (1 byte)
 /// * key length (4 bytes)
 /// * key bytes (variable)
 /// * value length (4 bytes, only for `SET`)
 /// * value bytes (variable, only for `SET`)
 ///
-/// The numbers are stored in big-endian format. The payload length covers
-/// every field that follows it. The value is only encoded for `SET` requests.
+/// The numbers are stored in big-endian format. The header is always 16 bytes,
+/// and the payload length covers every field that follows the header. The
+/// reserved header bytes are encoded as zeroes and ignored when decoding. The
+/// value is only encoded for `SET` requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub op: OpCode,
@@ -93,6 +101,7 @@ impl Request {
 
         encoding.push(REQUEST_ENCODING_VERSION);
         encoding.extend_from_slice(&payload_len.to_be_bytes());
+        encoding.extend_from_slice(&[0u8; REQUEST_RESERVED_HEADER_LENGTH as usize]);
         encoding.push(self.op.encode());
         encoding.extend_from_slice(&key_len.to_be_bytes());
         encoding.extend_from_slice(key_bytes);
@@ -130,6 +139,9 @@ impl Request {
             let payload_len =
                 u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap_unchecked());
             offset += 4;
+
+            // Skip the reserved header bytes
+            offset += REQUEST_RESERVED_HEADER_LENGTH as usize;
 
             let actual_payload_len = request_len - REQUEST_HEADER_LENGTH;
             if payload_len != actual_payload_len {
@@ -249,10 +261,11 @@ mod test {
     /// ```
     /// Request::new(OpCode::Set, "Hello", Some("World"));
     /// ```
-    const SET_ENCODING: [u8; 24] = [
+    const SET_ENCODING: [u8; 35] = [
         1, // version
         0, 0, 0, 19, // payload length
-        1,  // opcode SET
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // reserved header bytes
+        1, // opcode SET
         0, 0, 0, 5, // key length
         72, 101, 108, 108, 111, // "Hello"
         0, 0, 0, 5, // value length
@@ -263,10 +276,11 @@ mod test {
     /// ```
     /// Request::new(OpCode::Get, "Hello", None);
     /// ```
-    const GET_ENCODING: [u8; 15] = [
+    const GET_ENCODING: [u8; 26] = [
         1, // version
         0, 0, 0, 10, // payload length
-        2,  // opcode GET
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // reserved header bytes
+        2, // opcode GET
         0, 0, 0, 5, // key length
         72, 101, 108, 108, 111, // "Hello"
     ];
@@ -354,6 +368,15 @@ mod test {
     }
 
     #[test]
+    fn it_decodes_with_non_zero_reserved_header_bytes() {
+        let mut encoding = SET_ENCODING;
+        encoding[5..16].fill(0xFF);
+        let decoded_request = Request::decode(&encoding).unwrap();
+        let expected_request = Request::new(OpCode::Set, "Hello", Some("World")).unwrap();
+        assert_eq!(decoded_request, expected_request);
+    }
+
+    #[test]
     fn it_decodes_get() {
         let decoded_request = Request::decode(&GET_ENCODING).unwrap();
         let expected_request = Request::new(OpCode::Get, "Hello", None).unwrap();
@@ -367,8 +390,8 @@ mod test {
             Err(RequestDecodeError::RequestSizeTooLow(5))
         );
         assert_eq!(
-            Request::decode(&[0; 10]),
-            Err(RequestDecodeError::RequestSizeTooLow(10))
+            Request::decode(&[0; 21]),
+            Err(RequestDecodeError::RequestSizeTooLow(21))
         );
     }
 
@@ -398,7 +421,7 @@ mod test {
     #[test]
     fn it_does_not_decode_when_opcode_is_invalid() {
         let mut encoding = SET_ENCODING;
-        encoding[5] = 99; // Set invalid opcode
+        encoding[16] = 99; // Set invalid opcode
         assert_eq!(
             Request::decode(&encoding),
             Err(RequestDecodeError::InvalidOp(OpCodeError::InvalidOpCode(
@@ -410,7 +433,7 @@ mod test {
     #[test]
     fn it_does_not_decode_when_key_is_empty() {
         let mut encoding = SET_ENCODING;
-        encoding[6..10].copy_from_slice(&0u32.to_be_bytes());
+        encoding[17..21].copy_from_slice(&0u32.to_be_bytes());
         assert_eq!(
             Request::decode(&encoding),
             Err(RequestDecodeError::InvalidKey)
@@ -420,9 +443,10 @@ mod test {
     #[test]
     fn it_does_not_decode_when_value_length_is_missing() {
         // A SET request without room for the value length field.
-        let encoding: [u8; 11] = [
+        let encoding: [u8; 22] = [
             1, // version
             0, 0, 0, 6, // payload length
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // reserved header bytes
             1, // opcode SET
             0, 0, 0, 1,  // key length
             65, // "A"
@@ -430,7 +454,7 @@ mod test {
         assert_eq!(
             Request::decode(&encoding),
             Err(RequestDecodeError::UnexpectedEnd {
-                needed: 15,
+                needed: 26,
                 available: encoding.len(),
             })
         );
@@ -439,11 +463,11 @@ mod test {
     #[test]
     fn it_does_not_decode_when_key_is_truncated() {
         let mut encoding = GET_ENCODING;
-        encoding[6..10].copy_from_slice(&6u32.to_be_bytes());
+        encoding[17..21].copy_from_slice(&6u32.to_be_bytes());
         assert_eq!(
             Request::decode(&encoding),
             Err(RequestDecodeError::UnexpectedEnd {
-                needed: 16,
+                needed: 27,
                 available: GET_ENCODING.len(),
             })
         );
@@ -452,11 +476,11 @@ mod test {
     #[test]
     fn it_does_not_decode_when_value_is_truncated() {
         let mut encoding = SET_ENCODING;
-        encoding[15..19].copy_from_slice(&6u32.to_be_bytes());
+        encoding[26..30].copy_from_slice(&6u32.to_be_bytes());
         assert_eq!(
             Request::decode(&encoding),
             Err(RequestDecodeError::UnexpectedEnd {
-                needed: 25,
+                needed: 36,
                 available: SET_ENCODING.len(),
             })
         );
@@ -465,7 +489,7 @@ mod test {
     #[test]
     fn it_does_not_decode_set_when_there_are_trailing_bytes() {
         let mut encoding = SET_ENCODING;
-        encoding[15..19].copy_from_slice(&4u32.to_be_bytes());
+        encoding[26..30].copy_from_slice(&4u32.to_be_bytes());
         assert_eq!(
             Request::decode(&encoding),
             Err(RequestDecodeError::TrailingBytes { extra: 1 })
@@ -475,7 +499,7 @@ mod test {
     #[test]
     fn it_does_not_decode_get_when_there_are_trailing_bytes() {
         let mut encoding = GET_ENCODING;
-        encoding[6..10].copy_from_slice(&4u32.to_be_bytes());
+        encoding[17..21].copy_from_slice(&4u32.to_be_bytes());
         assert_eq!(
             Request::decode(&encoding),
             Err(RequestDecodeError::TrailingBytes { extra: 1 })
@@ -485,8 +509,8 @@ mod test {
     #[test]
     fn it_does_not_decode_when_key_is_invalid_utf8_bytes() {
         let mut encoding = SET_ENCODING;
-        encoding[10] = INVALID_UTF8[0];
-        encoding[11] = INVALID_UTF8[1];
+        encoding[21] = INVALID_UTF8[0];
+        encoding[22] = INVALID_UTF8[1];
         assert_matches!(
             Request::decode(&encoding),
             Err(RequestDecodeError::InvalidUtf8(_))
@@ -496,8 +520,8 @@ mod test {
     #[test]
     fn it_does_not_decode_when_value_is_invalid_utf8_bytes() {
         let mut encoding = SET_ENCODING;
-        encoding[19] = INVALID_UTF8[0];
-        encoding[20] = INVALID_UTF8[1];
+        encoding[30] = INVALID_UTF8[0];
+        encoding[31] = INVALID_UTF8[1];
         assert_matches!(
             Request::decode(&encoding),
             Err(RequestDecodeError::InvalidUtf8(_))
