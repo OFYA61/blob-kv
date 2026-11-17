@@ -58,7 +58,6 @@ Simple thread-per-connection design to keep the scope small. No async runtime or
 
 ##### Status codes
 
-
 | Code | Meaning                  |
 | ---- | ------------------------ |
 | 0x00 | OK                       |

@@ -25,9 +25,9 @@
 	 * Treat it as if the `SET` operation succeeded
 ### Testing
 
-- [ ] Key or value exceeds the configured limit
-- [ ] Record encoding fails
-- [ ] The log file cannot be opened
-- [ ] A write fails before writing any bytes
-- [ ] A write fails after writing part of a record
-- [ ] File synchronization fails
+- [x] Key or value exceeds the configured limit
+- [x] Record encoding fails
+- [x] The log file cannot be opened
+- [x] A write fails before writing any bytes
+- [x] A write fails after writing part of a record
+- [x] File synchronization fails
