@@ -12,7 +12,9 @@ pub struct Engine {
 
 impl Engine {
     pub fn init(log_path: impl AsRef<Path>) -> Result<Self, EngineInitError> {
-        let log = Log::init(log_path)?;
+        tracing::debug!(log_path = log_path.as_ref().to_str(), "Engine initiating");
+
+        let log = Log::init(&log_path)?;
         let mut index = HashMap::new();
         let records = log.scan_full()?;
 
@@ -25,10 +27,12 @@ impl Engine {
             };
         }
 
+        tracing::debug!(log_path = log_path.as_ref().to_str(), "Engine initaited");
         Ok(Self { log, index })
     }
 
     pub fn get(&self, key: &str) -> Result<Option<String>, EngineGetError> {
+        tracing::debug!(key, "Fetching value for key");
         match self.index.get(key) {
             None => Ok(None),
             Some(pos) => {
@@ -39,14 +43,20 @@ impl Engine {
     }
 
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), EngineSetError> {
+        tracing::debug!(key, "Setting value for key: {}", value);
+
         let record = Record::new(key, value, RecordOp::Set)?;
         let new_pos = self.log.append(&record)?;
         self.index.insert(key.to_string(), new_pos);
+
+        tracing::debug!(key, "Set value for key");
         Ok(())
     }
 
     pub fn del(&mut self, key: &str) -> Result<bool, EngineDelError> {
+        tracing::debug!(key, "Deleting value for key");
         if !self.index.contains_key(key) {
+            tracing::debug!(key, "Key not present");
             return Ok(false);
         }
 
@@ -54,6 +64,7 @@ impl Engine {
         self.log.append(&del_record)?;
         self.index.remove(key);
 
+        tracing::debug!(key, "Deleted value for key");
         Ok(true)
     }
 }

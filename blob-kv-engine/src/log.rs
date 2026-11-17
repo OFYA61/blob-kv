@@ -44,7 +44,7 @@ impl Log {
             .create(true)
             .read(true)
             .append(true)
-            .open(path)?;
+            .open(&path)?;
         file.try_lock()?;
 
         if exists {
@@ -67,17 +67,28 @@ impl Log {
             file.write_all(&DEFAULT_HEADER)?;
         }
 
+        tracing::debug!(path = path.as_ref().to_str(), "Log file opened");
         Ok(Self { file })
     }
 
     pub fn append(&mut self, record: &Record) -> io::Result<u64> {
+        tracing::debug!(key = record.key, "Record append initiated");
+
         let encoding = record.encode();
         let position = self.file.seek(io::SeekFrom::End(0))?;
         self.file.write_all(&encoding)?;
+
+        tracing::debug!(
+            key = record.key,
+            "Record append succeeded at position={}",
+            position
+        );
         Ok(position)
     }
 
     pub fn scan_full(&self) -> Result<Vec<RecordWrap>, RecordScanError> {
+        tracing::debug!("Full log scan initiated");
+
         let file_size = self.file.metadata()?.len();
         let mut offset = HEADER_LENGTH as u64;
         let mut records = Vec::new();
@@ -88,10 +99,10 @@ impl Log {
             let record = match Record::decode(&bytes) {
                 Ok(r) => r,
                 Err(err) => {
-                    println!(
-                        "Failed to decode record at position={} len{} with error={:?}",
+                    tracing::error!(
                         offset,
-                        bytes.len(),
+                        len = bytes.len(),
+                        "Failed to decode record with error={:?}",
                         err
                     );
                     decode_failures.push(RecordDecodeFailure {
@@ -114,11 +125,14 @@ impl Log {
             return Err(RecordScanError::DecodingFailures(decode_failures));
         }
 
+        tracing::debug!("Full log scan complete");
         Ok(records)
     }
 
     pub fn scan_record(&self, position: u64) -> Result<Record, RecordScanError> {
+        tracing::debug!(position, "Scanning position");
         let record = Record::decode(&self.scan_record_bytes(position)?)?;
+        tracing::debug!(position, "Scanned position");
         Ok(record)
     }
 
