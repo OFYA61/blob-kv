@@ -81,6 +81,7 @@ impl Log {
         let file_size = self.file.metadata()?.len();
         let mut offset = HEADER_LENGTH as u64;
         let mut records = Vec::new();
+        let mut decode_failures = Vec::new();
 
         while offset < file_size {
             let bytes = self.scan_record_bytes(offset)?;
@@ -88,9 +89,15 @@ impl Log {
                 Ok(r) => r,
                 Err(err) => {
                     println!(
-                        "Failed to decode record at position={} with error={:?}",
-                        offset, err
+                        "Failed to decode record at position={} len{} with error={:?}",
+                        offset,
+                        bytes.len(),
+                        err
                     );
+                    decode_failures.push(RecordDecodeFailure {
+                        position: offset,
+                        error: err,
+                    });
                     offset += bytes.len() as u64;
                     continue;
                 }
@@ -101,6 +108,10 @@ impl Log {
                 pos: offset,
             });
             offset += bytes.len() as u64;
+        }
+
+        if !decode_failures.is_empty() {
+            return Err(RecordScanError::DecodingFailures(decode_failures));
         }
 
         Ok(records)
@@ -141,6 +152,14 @@ pub enum RecordScanError {
     Io(#[from] io::Error),
     #[error("decode error: {0:?}")]
     Decoding(#[from] RecordDecodeError),
+    #[error("failed to decode record(s): {0:?}")]
+    DecodingFailures(Vec<RecordDecodeFailure>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordDecodeFailure {
+    pub position: u64,
+    pub error: RecordDecodeError,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,7 +176,7 @@ mod test {
         path::PathBuf,
     };
 
-    use crate::record::RecordOp;
+    use crate::record::{RecordDecodeError, RecordOp};
 
     use super::*;
     use tempfile::{TempDir, tempdir};
@@ -316,7 +335,7 @@ mod test {
     }
 
     #[test]
-    fn it_ignores_invalid_logs_on_scan() {
+    fn it_fails_scanning_when_records_are_corrupt() {
         let dir = get_dir();
         let path = dir.path().join(LOG);
         let mut log = Log::init(&path).expect("Failed to create log");
@@ -325,27 +344,42 @@ mod test {
         let record2 = Record::new("hello2", "", RecordOp::Set).unwrap();
         let record3 = Record::new("hello3", "world3", RecordOp::Set).unwrap();
 
-        let _ = log.append(&record1).expect("Failed to append record1");
+        let pos1 = log.append(&record1).expect("Failed to append record1");
         let pos2 = log.append(&record2).expect("Failed to append record2");
         let pos3 = log.append(&record3).expect("Failed to append record3");
 
-        // Close the log and modify the checksum of record1
+        // Close the log and modify the checksums of record1 and record3
         drop(log);
         let file = OpenOptions::new()
+            .read(true)
             .write(true)
             .open(&path)
             .expect("Failed to open log file");
-        file.write_at(&[0xFF], pos2 - 1)
-            .expect("Faild to overrwite checksum for record1");
+
+        let corrupt = |position: u64| {
+            let mut byte = [0u8; 1];
+            file.read_exact_at(&mut byte, position)
+                .expect("Failed to read log byte");
+            byte[0] ^= 0xFF;
+            file.write_at(&byte, position)
+                .expect("Failed to corrupt log byte");
+        };
+
+        corrupt(pos2 - 1);
+        corrupt(pos3 + record3.encode().len() as u64 - 1);
         drop(file);
 
         let log = Log::init(&path).expect("Failed to reopne log");
 
-        let scan = log.scan_full().expect("Failed to scan records");
-        assert_eq!(scan.len(), 2);
-        assert_eq!(scan[0].record, record2);
-        assert_eq!(scan[0].pos, pos2);
-        assert_eq!(scan[1].record, record3);
-        assert_eq!(scan[1].pos, pos3);
+        let result = log.scan_full();
+        assert_matches!(
+            result,
+            Err(RecordScanError::DecodingFailures(failures))
+                if failures.len() == 2
+                    && failures[0].position == pos1
+                    && failures[0].error == RecordDecodeError::ChecksumMismatch
+                    && failures[1].position == pos3
+                    && failures[1].error == RecordDecodeError::ChecksumMismatch
+        );
     }
 }

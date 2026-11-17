@@ -337,7 +337,7 @@ mod test {
     }
 
     #[test]
-    fn it_rebuilds_index_and_skips_corrupt_records() {
+    fn it_fails_to_rebuild_index_when_a_record_is_corrupt() {
         let dir = get_dir();
         let path = get_log_path(&dir);
         let mut engine = create_engine(&dir);
@@ -354,11 +354,14 @@ mod test {
 
         flip_byte(&path, first_pos + first_len - 1);
 
-        let engine = Engine::init(&path).expect("Failed to reopen engine");
-        let first = engine.get("first").expect("Failed to get key");
-        let second = engine.get("second").expect("Failed to get key");
-        assert_eq!(first, None);
-        assert_eq!(second, Some("two".to_string()));
+        let result = Engine::init(&path);
+        assert!(matches!(
+            result,
+            Err(EngineInitError::LogScan(RecordScanError::DecodingFailures(failures)))
+                if failures.len() == 1
+                    && failures[0].position == first_pos
+                    && failures[0].error == RecordDecodeError::ChecksumMismatch
+        ));
     }
 
     #[test]
