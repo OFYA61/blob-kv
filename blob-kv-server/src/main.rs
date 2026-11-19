@@ -1,7 +1,7 @@
-use blob_kv_engine::Engine;
-
 mod error;
 mod server;
+
+use blob_kv_engine::Engine;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
