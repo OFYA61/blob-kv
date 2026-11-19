@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::{io::ErrorKind, net::SocketAddr, sync::Arc};
 
 use blob_kv_engine::Engine;
-use blob_kv_protocol::{OpCode, Request, Response, Status};
+use blob_kv_protocol::{OpCode, REQUEST_HEADER_LENGTH, Request, Response, Status};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -25,84 +25,83 @@ pub async fn run(engine: Engine) -> Result<(), ()> {
         match listener.accept().await {
             Ok((socket, address)) => {
                 let engine = Arc::clone(&engine);
-                if let Some(err) =
-                    tokio::spawn(async move { handle_connection(socket, engine).await })
-                        .await
-                        .err()
-                {
-                    tracing::error!(
-                        address = address.to_string(),
-                        "Failed to spawn tokio task to handle connection: {:?}",
-                        err
-                    )
-                }
+                tokio::spawn(async move { handle_connection(socket, engine, address).await });
             }
             Err(err) => tracing::error!("Failed to accept connection{:?}", err),
         }
     }
 }
 
-async fn handle_connection(mut socket: TcpStream, engine: Arc<Mutex<Engine>>) {
-    let request = match read_and_parse(&mut socket).await {
-        Ok(request) => request,
-        Err(_) => {
-            let response = Response::new(Status::InvalidRequest, None).unwrap();
-            send_response(socket, response).await;
-            return;
-        }
-    };
-
-    let result = tokio::task::spawn_blocking(async move || {
-        let response = match request.op {
-            OpCode::Set => handle_set(request, engine).await,
-            OpCode::Get => handle_get(request, engine).await,
-            OpCode::Delete => handle_del(request, engine).await,
-        };
-
-        match response {
-            Ok(response) => send_response(socket, response).await,
-            Err(err) => {
-                tracing::error!("Error handling response: {:?}", err);
-                let response = err.to_response();
-                send_response(socket, response).await;
-            }
-        }
-    })
-    .await;
-
-    if let Some(err) = result.err() {
-        tracing::error!(
-            "Failed to spawn blocking task to handle connection: {:?}",
-            err
-        );
-        return;
-    }
-}
-
-async fn read_and_parse(socket: &mut TcpStream) -> Result<Request, ()> {
-    let mut buffer = [0u8; 4096];
-    let mut data = Vec::new();
+async fn handle_connection(mut socket: TcpStream, engine: Arc<Mutex<Engine>>, address: SocketAddr) {
+    tracing::info!(address = address.to_string(), "Connection accepted");
 
     loop {
-        let bytes_read = match socket.read(&mut buffer).await {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                tracing::error!("Failed while reading stream {:?}", err);
-                return Err(());
+        let request = match read_and_parse(&mut socket).await {
+            Ok(Some(request)) => request,
+            Ok(None) => break,
+            Err(_) => {
+                let response = Response::new(Status::InvalidRequest, None).unwrap();
+                let _ = send_response(&mut socket, response).await;
+                break;
             }
         };
 
-        if bytes_read == 0 {
+        let response = match request.op {
+            OpCode::Set => handle_set(request, Arc::clone(&engine)).await,
+            OpCode::Get => handle_get(request, Arc::clone(&engine)).await,
+            OpCode::Delete => handle_del(request, Arc::clone(&engine)).await,
+        };
+
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                tracing::error!("Error handling response: {:?}", err);
+                err.to_response()
+            }
+        };
+
+        if send_response(&mut socket, response).await.is_err() {
             break;
         }
-        data.extend_from_slice(&buffer[..bytes_read]);
+    }
+
+    tracing::info!(address = address.to_string(), "Connection closed");
+}
+
+async fn read_and_parse(socket: &mut TcpStream) -> Result<Option<Request>, ()> {
+    let header_len = REQUEST_HEADER_LENGTH as usize;
+    let mut header = [0u8; REQUEST_HEADER_LENGTH as usize];
+
+    match socket.read_exact(&mut header).await {
+        Ok(_) => {}
+        Err(err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+        Err(err) => {
+            tracing::error!("Failed while reading request header: {:?}", err);
+            return Err(());
+        }
+    }
+
+    // Request header layout: version (1 byte), payload length (4 bytes),
+    // reserved (11 bytes).
+    let payload_len = u32::from_be_bytes(
+        header[1..5]
+            .try_into()
+            .expect("request payload length is 4 bytes"),
+    ) as usize;
+
+    let mut data = vec![0u8; header_len + payload_len];
+    data[..header_len].copy_from_slice(&header);
+
+    if let Err(err) = socket.read_exact(&mut data[header_len..]).await {
+        tracing::error!("Failed while reading request payload: {:?}", err);
+        return Err(());
     }
 
     match Request::decode(&data) {
-        Ok(request) => Ok(request),
+        Ok(request) => Ok(Some(request)),
         Err(err) => {
-            tracing::error!("Failed to decode response {:?}", err);
-            return Err(());
+            tracing::error!("Failed to decode request: {:?}", err);
+            Err(())
         }
     }
 }
@@ -122,7 +121,10 @@ async fn handle_get(request: Request, engine: Arc<Mutex<Engine>>) -> HandleFunct
     let engine = engine.lock().await;
 
     match engine.get(&request.key) {
-        Ok(value) => Ok(Response::new(Status::Ok, value.as_deref())?),
+        Ok(value) => match value {
+            Some(value) => Ok(Response::new(Status::Ok, Some(value.as_str()))?),
+            None => Ok(Response::new(Status::KeyNotFound, None)?),
+        },
         Err(err) => Err(RequestHandleError::from(err)),
     }
 }
@@ -140,9 +142,15 @@ async fn handle_del(request: Request, engine: Arc<Mutex<Engine>>) -> HandleFunct
     }
 }
 
-async fn send_response(mut socket: TcpStream, response: Response) {
+async fn send_response(socket: &mut TcpStream, response: Response) -> Result<(), ()> {
     match socket.write_all(response.encode().as_ref()).await {
-        Err(err) => tracing::error!("Failed to send response: {:?}", err),
-        Ok(_) => tracing::debug!("Sent response"),
+        Err(err) => {
+            tracing::error!("Failed to send response: {:?}", err);
+            Err(())
+        }
+        Ok(_) => {
+            tracing::debug!("Sent response");
+            Ok(())
+        }
     }
 }
