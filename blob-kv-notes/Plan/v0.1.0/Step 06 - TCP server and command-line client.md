@@ -64,17 +64,17 @@ The response header is always **16 bytes**.
 
 ##### Status codes
 
-| Code | Meaning                  |
-| ---- | ------------------------ |
-| 0x00 | OK (read operations)     |
-| 0x01 | Stored (SET succeeded)   |
-| 0x02 | Deleted (DELETE succeeded) |
-| 0x03 | Key not found            |
-| 0x04 | Invalid request          |
-| 0x05 | Unsupported operation    |
-| 0x06 | Internal server error    |
-| 0x07 | Value too large          |
-| 0x08 | Invalid protocol version |
+| Code | Meaning                                  |
+| ---- | ---------------------------------------- |
+| 0x00 | OK (read operations and empty responses) |
+| 0x01 | Stored (SET succeeded)                   |
+| 0x02 | Deleted (DELETE succeeded)               |
+| 0x03 | Key not found                            |
+| 0x04 | Invalid request                          |
+| 0x05 | Unsupported operation                    |
+| 0x06 | Internal server error                    |
+| 0x07 | Value too large                          |
+| 0x08 | Invalid protocol version                 |
 
 ### Implement: CLI Client
 
