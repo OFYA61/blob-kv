@@ -20,18 +20,24 @@ const RESPONSE_MAX_LENGTH: u32 = u32::MAX;
 ///
 /// The numbers are stored in big-endian format. The header is always 16 bytes,
 /// and the payload length covers the bytes that follow the header. The reserved
-/// header bytes are encoded as zeroes and ignored when decoding.
+/// header bytes are encoded as zeroes and ignored when decoding. An absent
+/// payload is encoded with a payload length of zero and no payload bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
     pub status: Status,
-    pub payload: String,
+    pub payload: Option<String>,
 }
 
 impl Response {
-    pub fn new(status: Status, payload: &str) -> Result<Self, ResponseCreateError> {
-        tracing::debug!(status=?status, payload, "Response create initiated");
+    pub fn new(status: Status, payload: Option<&str>) -> Result<Self, ResponseCreateError> {
+        tracing::debug!(status=?status, payload=?payload, "Response create initiated");
 
-        let len = RESPONSE_HEADER_LENGTH + payload.len() as u32;
+        let payload = payload
+            .filter(|payload| !payload.is_empty())
+            .map(str::to_owned);
+
+        let len =
+            RESPONSE_HEADER_LENGTH + payload.as_ref().map_or(0, |payload| payload.len() as u32);
         if len == RESPONSE_MAX_LENGTH {
             return Err(ResponseCreateError::SizeLimitExceeded {
                 len,
@@ -40,14 +46,11 @@ impl Response {
         }
 
         tracing::debug!(status=?status, "Response create finished");
-        Ok(Self {
-            status,
-            payload: payload.to_owned(),
-        })
+        Ok(Self { status, payload })
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let payload_bytes = self.payload.as_bytes();
+        let payload_bytes = self.payload.as_deref().unwrap_or_default().as_bytes();
         let payload_len = payload_bytes.len() as u32;
 
         let mut encoding = Vec::with_capacity((RESPONSE_HEADER_LENGTH + payload_len) as usize);
@@ -104,7 +107,11 @@ impl Response {
                 });
             }
 
-            let payload = String::from_utf8(bytes[offset..payload_end].to_vec())?;
+            let payload = if payload_len == 0 {
+                None
+            } else {
+                Some(String::from_utf8(bytes[offset..payload_end].to_vec())?)
+            };
 
             if payload_end != bytes.len() {
                 return Err(ResponseDecodeError::TrailingBytes {
@@ -151,7 +158,7 @@ mod test {
 
     /// Encoding for
     /// ```
-    /// Response::new(Status::Ok, "World");
+    /// Response::new(Status::Ok, Some("World"));
     /// ```
     const ENCODING: [u8; 21] = [
         1, // version
@@ -165,13 +172,13 @@ mod test {
 
     #[test]
     fn it_encodes() {
-        let response = Response::new(Status::Ok, "World").unwrap();
+        let response = Response::new(Status::Ok, Some("World")).unwrap();
         assert_eq!(response.encode().as_slice(), ENCODING);
     }
 
     #[test]
     fn it_encodes_and_decodes() {
-        let response = Response::new(Status::Ok, "World").unwrap();
+        let response = Response::new(Status::Ok, Some("World")).unwrap();
         let decoded_response = Response::decode(&response.encode()).unwrap();
         assert_eq!(decoded_response, response);
     }
@@ -179,7 +186,7 @@ mod test {
     #[test]
     fn it_decodes() {
         let decoded_response = Response::decode(&ENCODING).unwrap();
-        let expected_response = Response::new(Status::Ok, "World").unwrap();
+        let expected_response = Response::new(Status::Ok, Some("World")).unwrap();
         assert_eq!(decoded_response, expected_response);
     }
 
@@ -188,35 +195,41 @@ mod test {
         let mut encoding = ENCODING;
         encoding[6..16].fill(0xFF);
         let decoded_response = Response::decode(&encoding).unwrap();
-        let expected_response = Response::new(Status::Ok, "World").unwrap();
+        let expected_response = Response::new(Status::Ok, Some("World")).unwrap();
         assert_eq!(decoded_response, expected_response);
     }
 
     #[test]
-    fn it_encodes_and_decodes_empty_payload() {
-        let response = Response::new(Status::Ok, "").unwrap();
+    fn it_encodes_and_decodes_absent_payload() {
+        let response = Response::new(Status::Ok, None).unwrap();
         let encoding = response.encode();
         assert_eq!(encoding, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(Response::decode(&encoding), Ok(response));
     }
 
     #[test]
+    fn it_treats_empty_payload_as_absent() {
+        let response = Response::new(Status::Ok, Some("")).unwrap();
+        assert_eq!(response, Response::new(Status::Ok, None).unwrap());
+    }
+
+    #[test]
     fn it_encodes_and_decodes_error_status_with_payload() {
-        let response = Response::new(Status::InternalServerError, "boom").unwrap();
+        let response = Response::new(Status::InternalServerError, Some("boom")).unwrap();
         let decoded_response = Response::decode(&response.encode()).unwrap();
         assert_eq!(decoded_response, response);
     }
 
     #[test]
     fn it_encodes_and_decodes_stored_status() {
-        let response = Response::new(Status::Stored, "").unwrap();
+        let response = Response::new(Status::Stored, None).unwrap();
         let decoded_response = Response::decode(&response.encode()).unwrap();
         assert_eq!(decoded_response, response);
     }
 
     #[test]
     fn it_encodes_and_decodes_deleted_status() {
-        let response = Response::new(Status::Deleted, "").unwrap();
+        let response = Response::new(Status::Deleted, None).unwrap();
         let decoded_response = Response::decode(&response.encode()).unwrap();
         assert_eq!(decoded_response, response);
     }
