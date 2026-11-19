@@ -29,10 +29,6 @@ pub struct Response {
 }
 
 impl Response {
-    /// Creates a response.
-    ///
-    /// An empty payload is treated the same as an absent payload, since both
-    /// are encoded with a payload length of zero.
     pub fn new(status: Status, payload: Option<&str>) -> Result<Self, ResponseCreateError> {
         tracing::debug!(status=?status, payload=?payload, "Response create initiated");
 
