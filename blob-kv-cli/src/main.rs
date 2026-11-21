@@ -1,5 +1,9 @@
+mod command;
+
 use blob_kv_client::{Client, Error as ClientError, Response};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, ReedlineError, Signal};
+
+use crate::command::Command;
 
 const SERVER_ADDR: &str = "127.0.0.1:9999";
 
@@ -11,67 +15,6 @@ enum CliError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Reedline(#[from] ReedlineError),
-}
-
-enum Command {
-    Get(String),
-    Set(String, String),
-    Del(String),
-}
-
-fn parse_command(input: &str) -> Option<Command> {
-    let mut parts = input.split(' ');
-    let command = parts.next().unwrap_or_default();
-
-    match command {
-        "GET" => {
-            let key = parts.next();
-            if parts.next().is_some() {
-                eprintln!("error: too many arguments for {command}");
-                return None;
-            }
-
-            let Some(key) = key else {
-                eprintln!("error: {command} expects a key");
-                return None;
-            };
-
-            Some(Command::Get(key.to_owned()))
-        }
-        "SET" => {
-            let key = parts.next();
-            let value = parts.next().unwrap_or_default();
-            if parts.next().is_some() {
-                eprintln!("error: too many arguments for {command}");
-                return None;
-            }
-
-            let Some(key) = key else {
-                eprintln!("error: {command} expects a key");
-                return None;
-            };
-
-            Some(Command::Set(key.to_owned(), value.to_owned()))
-        }
-        "DEL" => {
-            let key = parts.next();
-            if parts.next().is_some() {
-                eprintln!("error: too many arguments for {command}");
-                return None;
-            }
-
-            let Some(key) = key else {
-                eprintln!("error: {command} expects a key");
-                return None;
-            };
-
-            Some(Command::Del(key.to_owned()))
-        }
-        _ => {
-            eprintln!("error: unknown command '{command}'");
-            None
-        }
-    }
 }
 
 fn print_response_error(response: &Response) {
@@ -114,18 +57,22 @@ fn run() -> Result<(), CliError> {
     loop {
         match line_editor.read_line(&prompt)? {
             Signal::Success(input) => {
-                let Some(command) = parse_command(&input) else {
-                    continue;
+                let command = match Command::from(&input) {
+                    Ok(command) => command,
+                    Err(err) => {
+                        err.iter().for_each(|e| eprintln!("{}", e));
+                        continue;
+                    }
                 };
 
                 let result = match command {
-                    Command::Get(key) => client
+                    Command::Get { key } => client
                         .get(&key)
                         .map(|response| handle_get_response(&response)),
-                    Command::Set(key, value) => client
-                        .set(&key, &value)
+                    Command::Set { key, value } => client
+                        .set(&key, value.as_deref().unwrap_or(""))
                         .map(|response| handle_write_response(&response)),
-                    Command::Del(key) => client
+                    Command::Del { key } => client
                         .del(&key)
                         .map(|response| handle_write_response(&response)),
                 };
