@@ -4,8 +4,10 @@ use std::{
 };
 
 use blob_kv_protocol::{
-    OpCode, RESPONSE_HEADER_LENGTH, Request, RequestCreateError, Response, ResponseDecodeError,
+    OpCode, RESPONSE_HEADER_LENGTH, Request, RequestCreateError, ResponseDecodeError,
 };
+
+pub use blob_kv_protocol::Response;
 
 pub struct Client {
     stream: TcpStream,

@@ -1,5 +1,5 @@
-use blob_kv_client::{Client, Error as ClientError};
-use reedline::{DefaultPrompt, Reedline, ReedlineError, Signal};
+use blob_kv_client::{Client, Error as ClientError, Response};
+use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, ReedlineError, Signal};
 
 const SERVER_ADDR: &str = "127.0.0.1:9999";
 
@@ -74,6 +74,30 @@ fn parse_command(input: &str) -> Option<Command> {
     }
 }
 
+fn print_response_error(response: &Response) {
+    match response.payload.as_deref() {
+        Some(payload) => eprintln!("error: {payload}"),
+        None => eprintln!("error: {:?}", response.status),
+    }
+}
+
+fn handle_get_response(response: &Response) {
+    let status = response.status;
+
+    match (status.is_ok(), response.payload.as_deref()) {
+        (true, Some(payload)) => println!("{payload}"),
+        (true, None) => println!(),
+        (false, Some(payload)) => eprintln!("error: {payload}"),
+        (false, None) => print_response_error(response),
+    }
+}
+
+fn handle_write_response(response: &Response) {
+    if !response.status.is_ok() {
+        print_response_error(response);
+    }
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("error: {err}");
@@ -85,7 +109,7 @@ fn run() -> Result<(), CliError> {
     let mut client = Client::connect(SERVER_ADDR)?;
 
     let mut line_editor = Reedline::create();
-    let prompt = DefaultPrompt::default();
+    let prompt = DefaultPrompt::new(DefaultPromptSegment::Empty, DefaultPromptSegment::Empty);
 
     loop {
         match line_editor.read_line(&prompt)? {
@@ -94,17 +118,20 @@ fn run() -> Result<(), CliError> {
                     continue;
                 };
 
-                let response = match command {
-                    Command::Get(key) => client.get(&key),
-                    Command::Set(key, value) => client.set(&key, &value),
-                    Command::Del(key) => client.del(&key),
+                let result = match command {
+                    Command::Get(key) => client
+                        .get(&key)
+                        .map(|response| handle_get_response(&response)),
+                    Command::Set(key, value) => client
+                        .set(&key, &value)
+                        .map(|response| handle_write_response(&response)),
+                    Command::Del(key) => client
+                        .del(&key)
+                        .map(|response| handle_write_response(&response)),
                 };
 
-                match response {
-                    Ok(response) => {
-                        println!("status: {:?}", response.status);
-                        println!("payload: {:?}", response.payload);
-                    }
+                match result {
+                    Ok(()) => {}
                     Err(ClientError::Request(err)) => eprintln!("error: {err}"),
                     Err(err) => return Err(err.into()),
                 }
