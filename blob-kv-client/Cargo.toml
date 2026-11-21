@@ -1,0 +1,8 @@
+[package]
+name = "blob-kv-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+blob-kv-protocol = { path = "../blob-kv-protocol" }
+thiserror = "2.0.21"

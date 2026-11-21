@@ -24,10 +24,18 @@ dependencies = [
 name = "blob-kv-cli"
 version = "0.1.0"
 dependencies = [
- "blob-kv-protocol",
+ "blob-kv-client",
  "reedline",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "blob-kv-client"
+version = "0.1.0"
+dependencies = [
+ "blob-kv-protocol",
+ "thiserror",
 ]
 
 [[package]]
