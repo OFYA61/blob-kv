@@ -10,13 +10,13 @@ use tokio::{
 
 use crate::error::{RequestHandleError, ToErrorResponse};
 
-pub async fn run(engine: Engine) -> Result<(), ()> {
+pub async fn run(engine: Engine, host: &str, port: u16) -> Result<(), ()> {
     let engine = Arc::new(Mutex::new(engine));
 
-    let listener = match TcpListener::bind("0.0.0.0:9999").await {
+    let listener = match TcpListener::bind((host, port)).await {
         Ok(listener) => listener,
         Err(err) => {
-            tracing::error!("Failed to bind TcpListener: {:?}", err);
+            tracing::error!("Failed to bind TcpListener to {host}:{port}: {:?}", err);
             return Err(());
         }
     };
