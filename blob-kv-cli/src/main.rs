@@ -1,11 +1,10 @@
 mod command;
+mod config;
 
 use blob_kv_client::{Client, Error as ClientError, Response};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, ReedlineError, Signal};
 
-use crate::command::Command;
-
-const SERVER_ADDR: &str = "127.0.0.1:9999";
+use crate::{command::Command, config::CliConfig};
 
 #[derive(Debug, thiserror::Error)]
 enum CliError {
@@ -42,14 +41,16 @@ fn handle_write_response(response: &Response) {
 }
 
 fn main() {
-    if let Err(err) = run() {
+    let config = CliConfig::parse();
+
+    if let Err(err) = run(config) {
         eprintln!("error: {err}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), CliError> {
-    let mut client = Client::connect(SERVER_ADDR)?;
+fn run(config: CliConfig) -> Result<(), CliError> {
+    let mut client = Client::connect(&config.server_addr())?;
 
     let mut line_editor = Reedline::create();
     let prompt = DefaultPrompt::new(DefaultPromptSegment::Empty, DefaultPromptSegment::Empty);

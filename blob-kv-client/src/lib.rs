@@ -14,8 +14,11 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn connect(addr: &'static str) -> Result<Self, Error> {
-        let stream = TcpStream::connect(addr).map_err(|source| Error::Connect { addr, source })?;
+    pub fn connect(addr: &str) -> Result<Self, Error> {
+        let stream = TcpStream::connect(addr).map_err(|source| Error::Connect {
+            addr: addr.to_string(),
+            source,
+        })?;
         Ok(Self { stream })
     }
 
@@ -62,7 +65,7 @@ impl Client {
 pub enum Error {
     #[error("failed to connect to server at {addr}: {source}")]
     Connect {
-        addr: &'static str,
+        addr: String,
         #[source]
         source: io::Error,
     },
