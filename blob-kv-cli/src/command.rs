@@ -12,6 +12,7 @@ impl Command {
         parser()
             .parse(str)
             .into_result()
+            // TODO: improve error messages
             .map_err(|err| err.to_vec().iter().map(|e| e.to_string()).collect())
     }
 }
