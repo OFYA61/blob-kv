@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-blob-kv-protocol = { path = "../blob-kv-protocol" }
+blob-kv-client = { path = "../blob-kv-client" }
 reedline = "0.53.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
