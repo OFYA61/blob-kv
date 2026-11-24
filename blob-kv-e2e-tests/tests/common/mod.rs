@@ -37,18 +37,20 @@ pub struct TestServer {
 
 impl TestServer {
     pub fn start() -> Self {
-        let data_dir = TempDir::with_prefix("blob-kv-e2e-").expect("failed to create temp dir");
+        let data_dir =
+            TempDir::with_prefix("blob-kv-e2e-tests-").expect("failed to create temp dir");
         let log_file = data_dir.path().join("store.log");
         Self::start_with_dir(data_dir, log_file)
     }
 
     pub fn start_with_log_file(log_file: impl Into<PathBuf>) -> Self {
-        let data_dir = TempDir::with_prefix("blob-kv-e2e-").expect("failed to create temp dir");
+        let data_dir =
+            TempDir::with_prefix("blob-kv-e2e-tests-").expect("failed to create temp dir");
         Self::start_with_dir(data_dir, log_file.into())
     }
 
     pub fn try_start_with_log_file(log_file: impl Into<PathBuf>) -> Result<Self, ServerStartError> {
-        let data_dir = TempDir::with_prefix("blob-kv-e2e-").map_err(ServerStartError::Io)?;
+        let data_dir = TempDir::with_prefix("blob-kv-e2e-tests-").map_err(ServerStartError::Io)?;
         let mut server = Self::new(data_dir, log_file.into());
         server.launch()?;
         Ok(server)
