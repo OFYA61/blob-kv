@@ -3,6 +3,7 @@ resolver="3"
 members = [
     "blob-kv-cli",
     "blob-kv-client",
+    "blob-kv-e2e-tests",
     "blob-kv-engine",
     "blob-kv-protocol",
     "blob-kv-server",
