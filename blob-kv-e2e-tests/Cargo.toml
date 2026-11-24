@@ -4,17 +4,17 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
-# These binary targets point at the real server and CLI sources. Defining them
-# here means `cargo test -p blob-kv-e2e-tests` builds the binaries in the same
-# package as the integration tests, so `CARGO_BIN_EXE_*` is available and the
-# tests always exercise binaries built from the current sources.
+# These binary targets point at the real server and CLI sources. The names are
+# unique to this package so they do not collide with the original binaries when
+# the whole workspace is built. Defining them here also means
+# `cargo test -p blob-kv-e2e-tests` builds them from the current sources.
 [[bin]]
-name = "blob-kv-server"
+name = "blob-kv-server-e2e"
 path = "../blob-kv-server/src/main.rs"
 test = false
 
 [[bin]]
-name = "blob-kv-cli"
+name = "blob-kv-cli-e2e"
 path = "../blob-kv-cli/src/main.rs"
 test = false
 

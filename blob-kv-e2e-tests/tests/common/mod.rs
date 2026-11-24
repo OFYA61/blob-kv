@@ -593,11 +593,11 @@ fn free_port() -> io::Result<u16> {
 }
 
 fn server_binary() -> PathBuf {
-    binary_path("blob-kv-server")
+    binary_path("blob-kv-server-e2e")
 }
 
 fn cli_binary() -> PathBuf {
-    binary_path("blob-kv-cli")
+    binary_path("blob-kv-cli-e2e")
 }
 
 // Resolve a binary built from this package. Cargo sets CARGO_BIN_EXE_<name>
