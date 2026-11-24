@@ -80,6 +80,7 @@ cargo run --release -p blob-kv-cli
 SET hello world
 GET hello
 DEL hello
+SET "key with whitespaces" 'value with whitespaces'
 ```
 
 ## Configuration
