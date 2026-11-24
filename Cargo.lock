@@ -150,7 +150,6 @@ dependencies = [
 name = "blob-kv-engine"
 version = "0.1.0"
 dependencies = [
- "clap",
  "crc",
  "tempfile",
  "thiserror",
