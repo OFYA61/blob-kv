@@ -22,8 +22,6 @@
 `blob-kv` is a lightweight key-value database backed by an append-only log. It provides a TCP server, and a CLI client for interacting with the database.
 The project is built to explore database internals, persistent storage, network protocols, and systems programming.
 
-A key-value store database backed by an append-only log.
-
 ## Project structure
 
 The following is the list of subcrates:
