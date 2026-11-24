@@ -1,0 +1,21 @@
+services:
+  blob-kv:
+    build: .
+    container_name: blob-kv
+    ports:
+      - "6379:6379"
+    volumes:
+      - blob-kv-data:/data
+    environment:
+      BLOB_KV_CLI_HOST: 127.0.0.1
+      BLOB_KV_CLI_PORT: 6379
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "6379"
+      - "--log-file"
+      - "/data/data.log"
+
+volumes:
+  blob-kv-data:

@@ -1,0 +1,7 @@
+target/
+.git/
+.github/
+.gitignore
+blob-kv-notes/
+test.log
+*.log
